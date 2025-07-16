@@ -1,0 +1,12 @@
+# System generated files
+.DS_Store
+
+# Node
+node_modules
+
+# VSCode
+.vscode
+
+# Parcel
+dist
+.parcel-cache
