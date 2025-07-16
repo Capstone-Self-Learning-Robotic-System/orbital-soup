@@ -67,7 +67,7 @@ async function runHttpServer() {
   console.info('Running http server')
   httpServer = http.createServer(appServer)
   await new Promise((resolve) => {
-    httpServer.listen(8000, 'localhost', resolve)
+    httpServer.listen(8000, '10.2.0.4', resolve)
   })
 }
 

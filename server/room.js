@@ -75,6 +75,8 @@ class Room extends EventEmitter {
         return
       }
 
+      console.log("[%s] Peer left", peer.id)
+
       if (peer.id.startsWith('robot-')) {
         this.close()
       }
@@ -86,6 +88,7 @@ class Room extends EventEmitter {
       }
 
       for (const transport of peer.data.transports.values()) {
+        console.log("[%s] Transport closed", transport.id)
         transport.close()
       }
     })
@@ -148,6 +151,7 @@ class Room extends EventEmitter {
         }
 
         console.log("[%s] Peer joined", peer.id)
+
         break;
       }
 
@@ -161,10 +165,12 @@ class Room extends EventEmitter {
         } = request.data
 
         const webRtcTransportOptions = {
-          listenIps: [
+          listenInfos: [
             {
-              ip: '127.0.0.1',
-            }
+              ip: '0.0.0.0',
+              announcedAddress: '20.153.160.2',
+              announcedPort: 8000,
+            },
           ],
           initialAvailableOutgoingBitrate: 1000000,
           minimumAvailableOutgoingBitrate: 600000,
@@ -174,17 +180,14 @@ class Room extends EventEmitter {
           appData        : { producing, consuming },
         }
 
-          const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
+        const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
 
         transport.on('sctpstatechange', (sctpState) => {
-        //   console.debug('WebRtcTransport "sctpstatechange" event [sctpState:%s]', sctpState)
+          console.debug('WebRtcTransport "sctpstatechange" event [sctpState:%s]', sctpState)
         })
 
         transport.on('dtlsstatechange', (dtlsState) => {
-          if (dtlsState === 'failed' || dtlsState === 'closed') {
-            console.log("[%s] Peer left", peer.id)
-            // console.warn('WebRtcTransport "dtlsstatechange" event [dtlsState:%s]', dtlsState)
-          }
+          console.log('WebRtcTransport "dtlsstatechange" event [dtlsState:%s]', dtlsState)
         })
 
         // store the web rtc transport into the protoo peer data object
