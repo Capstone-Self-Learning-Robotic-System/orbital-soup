@@ -75,8 +75,6 @@ class Room extends EventEmitter {
         return
       }
 
-      console.log("[%s] Peer left", peer.id)
-
       if (peer.id.startsWith('robot-')) {
         this.close()
       }
@@ -88,7 +86,6 @@ class Room extends EventEmitter {
       }
 
       for (const transport of peer.data.transports.values()) {
-        console.log("[%s] Transport closed", transport.id)
         transport.close()
       }
     })
@@ -151,7 +148,6 @@ class Room extends EventEmitter {
         }
 
         console.log("[%s] Peer joined", peer.id)
-
         break;
       }
 
@@ -165,12 +161,11 @@ class Room extends EventEmitter {
         } = request.data
 
         const webRtcTransportOptions = {
-          listenInfos: [
+          listenIps: [
             {
-              ip: '0.0.0.0',
-              announcedAddress: '20.153.160.2',
-              announcedPort: 8000,
-            },
+              ip: '10.2.0.4',
+              announcedIp: '20.153.160.2'
+            }
           ],
           initialAvailableOutgoingBitrate: 1000000,
           minimumAvailableOutgoingBitrate: 600000,
@@ -180,14 +175,17 @@ class Room extends EventEmitter {
           appData        : { producing, consuming },
         }
 
-        const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
+          const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
 
         transport.on('sctpstatechange', (sctpState) => {
-          console.debug('WebRtcTransport "sctpstatechange" event [sctpState:%s]', sctpState)
+        //   console.debug('WebRtcTransport "sctpstatechange" event [sctpState:%s]', sctpState)
         })
 
         transport.on('dtlsstatechange', (dtlsState) => {
-          console.log('WebRtcTransport "dtlsstatechange" event [dtlsState:%s]', dtlsState)
+          if (dtlsState === 'failed' || dtlsState === 'closed') {
+            console.log("[%s] Peer left", peer.id)
+            // console.warn('WebRtcTransport "dtlsstatechange" event [dtlsState:%s]', dtlsState)
+          }
         })
 
         // store the web rtc transport into the protoo peer data object
@@ -255,14 +253,14 @@ class Room extends EventEmitter {
         accept({ id: producer.id })
 
         // optimization: create a server-side consumer for each peer
-        for (const otherPeer of this.getJoinedPeers({ excludePeer: peer })) {
+        if (!peer.id.startsWith('robot-')) {
           this.createConsumer({
-            consumerPeer : otherPeer,
-            producerPeer : peer,
+            consumerPeer : peer,
+            producerPeer : this.room.peers.find(peer => peer.id.startsWith('robot-')),
             producer,
           })
         }
-          break
+        break
       }
 
       case 'closeProducer': {

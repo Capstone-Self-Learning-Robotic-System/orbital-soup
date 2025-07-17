@@ -34,7 +34,7 @@ function closeConnections() {
 async function join() {
   const randomPeerId = random(1, 1000000)
   const roomId = 1
-  const protooUrl = 'ws://localhost:8000?peerId=client-' + randomPeerId + '&roomId=' + roomId
+  const protooUrl = 'ws://20.153.160.2:8000?peerId=client-' + randomPeerId + '&roomId=' + roomId
   console.debug("PeerId %i, RoomId %i", randomPeerId, roomId)
   const protooTransport = new protooClient.WebSocketTransport(protooUrl)
   protoo = new protooClient.Peer(protooTransport)

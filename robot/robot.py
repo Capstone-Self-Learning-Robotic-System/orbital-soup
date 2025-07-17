@@ -3,6 +3,7 @@ import json
 import asyncio
 import argparse
 import secrets
+from turtle import width
 from typing import Optional, Dict, Awaitable, Any, TypeVar
 from asyncio.futures import Future
 import cv2
@@ -39,7 +40,11 @@ class CameraStreamTrack(VideoStreamTrack):
 
         # set up camera
         self.cap = cv2.VideoCapture(camera_id)
-        # self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+
+        # get stereo vision
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 2560)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
         self.fps = int(self.cap.get(cv2.CAP_PROP_FPS))
         print("Framerate:", str(self.fps))
@@ -50,27 +55,35 @@ class CameraStreamTrack(VideoStreamTrack):
         # put timestamp
         self.put_timestamp = put_timestamp
 
+        self.video_frame_buffer = None
+
     async def recv(self):
-        self.frame_count += 1
+        print("recv frame:", str(self.frame_count))
+        try:
+            self.frame_count += 1
 
-        ret, frame = self.cap.read()
-        if not ret:
-            print("Failed to read frame from camera")
-            return None
-        
-        # add timestamp if desired
-        if self.put_timestamp:
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            cv2.putText(frame, timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            ret, frame = self.cap.read()
+            if not ret:
+                print("Failed to read frame from camera")
+                return None
+            
+            # add timestamp if desired
+            if self.put_timestamp:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                cv2.putText(frame, timestamp, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # format video frame
-        frame = np.asarray(frame, dtype=np.uint8)
-        video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
-        video_frame.pts = self.frame_count
-        video_frame.time_base = fractions.Fraction(1, self.fps)
+            # format video frame
+            frame = np.asarray(frame, dtype=np.uint8)
+            video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
+            video_frame.pts = self.frame_count
+            video_frame.time_base = fractions.Fraction(1, self.fps)
 
-        return video_frame
+            self.video_frame_buffer = video_frame
 
+            print("frame successful")
+            return video_frame
+        except:
+            return self.video_frame_buffer
 
 class RobotClient:
     def __init__(self, uri, video_track):
@@ -113,12 +126,12 @@ class RobotClient:
         return round(random() * 10000000)
 
     async def run(self):
-        self.websocket = await websockets.connect(origin="http://localhost:8000", uri=self.uri, subprotocols=["protoo"])
+        self.websocket = await websockets.connect(origin="http://20.153.160.2:8000", uri=self.uri, subprotocols=["protoo"])
         await self.load()
         await self.create_send_transport()
         await self.produce()
 
-        while not self.closed:
+        while True:
             await asyncio.sleep(0.1)
 
     async def load(self):
@@ -231,7 +244,7 @@ class RobotClient:
 
         # produce
         videoProducer: Producer = await self.send_transport.produce(
-            track=self.video_track, stopTracks=False, appData={}
+            track=self.video_track, stopTracks=True, appData={}
         )
         self.producers.append(videoProducer)
 
@@ -249,14 +262,16 @@ if __name__ == "__main__":
 
     peerId = round(random() * 1000000)
     roomId = sys.argv[1]
-    uri = f"ws://localhost:8000?peerId=robot-{peerId}&roomId={roomId}"
+    uri = f"ws://20.153.160.2:8000?peerId=robot-{peerId}&roomId={roomId}"
 
-    video_track = CameraStreamTrack(camera_id=0)
+    video_track = CameraStreamTrack(camera_id=0, put_timestamp=True)
     client = RobotClient(uri=uri, video_track=video_track)
 
-    try:
-        asyncio.run(client.run())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        asyncio.run(client.close())
+    asyncio.run(client.run())
+
+    # try:
+    #     asyncio.run(client.run())
+    # except KeyboardInterrupt:
+    #     pass
+    # finally:
+    #     asyncio.run(client.close())

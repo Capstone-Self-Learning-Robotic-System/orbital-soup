@@ -42,8 +42,8 @@ async function runMediasoupWorker() {
       'svc',
       'sctp'
     ],
-    rtcMinPort : 40000,
-    rtcMaxPort : 49999,
+    rtcMinPort : 4000,
+    rtcMaxPort : 4999,
   })
 
   // handle mediasoup worker death
