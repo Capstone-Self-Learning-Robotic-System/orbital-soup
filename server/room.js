@@ -75,6 +75,8 @@ class Room extends EventEmitter {
         return
       }
 
+      console.log("[%s] Peer closed", peer.id)
+
       if (peer.id.startsWith('robot-')) {
         this.close()
       }
@@ -183,7 +185,6 @@ class Room extends EventEmitter {
 
         transport.on('dtlsstatechange', (dtlsState) => {
           if (dtlsState === 'failed' || dtlsState === 'closed') {
-            console.log("[%s] Peer left", peer.id)
             // console.warn('WebRtcTransport "dtlsstatechange" event [dtlsState:%s]', dtlsState)
           }
         })
