@@ -135,11 +135,13 @@ class Room extends EventEmitter {
         for (const joinedPeer of joinedPeers) {
           // create consumers for existing producers
           for (const producer of joinedPeer.data.producers.values()) {
-            this.createConsumer({
-              consumerPeer: peer,
-              producerPeer: joinedPeer,
-              producer,
-            })
+            if (joinedPeer.id.startsWith('robot-')) {
+              this.createConsumer({
+                consumerPeer: peer,
+                producerPeer: joinedPeer,
+                producer,
+              })
+            }
           }
         }
 
@@ -177,17 +179,7 @@ class Room extends EventEmitter {
           appData        : { producing, consuming },
         }
 
-          const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
-
-        transport.on('sctpstatechange', (sctpState) => {
-        //   console.debug('WebRtcTransport "sctpstatechange" event [sctpState:%s]', sctpState)
-        })
-
-        transport.on('dtlsstatechange', (dtlsState) => {
-          if (dtlsState === 'failed' || dtlsState === 'closed') {
-            // console.warn('WebRtcTransport "dtlsstatechange" event [dtlsState:%s]', dtlsState)
-          }
-        })
+        const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
 
         // store the web rtc transport into the protoo peer data object
         peer.data.transports.set(transport.id, transport)
@@ -252,17 +244,53 @@ class Room extends EventEmitter {
         peer.data.producers.set(producer.id, producer)
 
         accept({ id: producer.id })
-
-        // optimization: create a server-side consumer for each peer
-        if (!peer.id.startsWith('robot-')) {
-          this.createConsumer({
-            consumerPeer : peer,
-            producerPeer : this.room.peers.find(peer => peer.id.startsWith('robot-')),
-            producer,
-          })
-        }
+        console.log("[%s] Created video producer", peer.id)
         break
       }
+
+      // case 'produceData': {
+
+      //   // ensure the peer is joined
+      //   if (!peer.data.joined) {
+      //     throw new Error('Peer not yet joined')
+      //   }
+
+      //   const { transportId, sctpStreamParameters, label } = request.data
+      //   const transport = peer.data.transports.get(transportId)
+
+      //   if (!transport) {
+      //     throw new Error(`transport with id "${transportId}" not found`)
+      //   }
+
+      //   const producer = await transport.produceData({
+      //     sctpStreamParameters,
+      //     label,
+      //     });
+        
+      //   const consumer = await transport.consumeData({
+      //     dataProducerId: producer.id,
+      //     sctpStreamParameters,
+      //     label,
+      //   })
+        
+      //   const robotPeer = this.room.peers.find(peer => peer.id.startsWith('robot-'))
+      //   robotPeer.data.consumers.set(consumer.id, consumer)
+
+      //   if (robotPeer) {
+      //     this.createDataConsumer({
+      //       consumerPeer: robotPeer,
+      //       producerPeer: peer,
+      //       producer,
+      //     })
+      //   }
+
+      //   // store the producer into the protoo peer data object
+      //   peer.data.producers.set(producer.id, producer)
+
+      //   accept({ id: producer.id }) 
+      //   console.log("[%s] Created data producer", peer.id)
+      //   break
+      // }
 
       case 'closeProducer': {
         // ensure the peer is joined
@@ -284,6 +312,24 @@ class Room extends EventEmitter {
 
         accept()
 
+        break
+      }
+
+      case 'data': {
+        const { label, orientation } = request.data
+        console.log("[%s] %s data received", peer.id, label)
+
+        const robotPeer = this.room.peers.find(peer => peer.id.startsWith('robot-'))
+        if (robotPeer) {
+          robotPeer.request('data', {
+            id: 12345,
+            label,
+            orientation
+          })
+        }
+
+        accept()
+        
         break
       }
     }
@@ -337,6 +383,53 @@ class Room extends EventEmitter {
       console.warn('createConsumer() | failed:%o', error)
     }
   }
+
+  // async createDataConsumer({ consumerPeer, producerPeer, producer }) {
+
+  //   // must take the transport the remote peer is using for consuming
+  //   const transport = Array.from(consumerPeer.data.transports.values())
+  //     .find((t) => t.appData.consuming)
+
+  //   if (!transport) {
+  //     console.warn('createDataConsumer() | Transport for consuming not found')
+  //     return
+  //   }
+
+  //   let consumer
+
+  //   try {
+  //     consumer = await transport.consumeData({
+  //       dataProducerId: producer.id,
+  //       sctpStreamParameters: producer.sctpStreamParameters,
+  //       label: producer.label
+  //     })
+  //   } catch (error) {
+  //     console.warn('createDataConsumer() | transport.consumeData():%o', error)
+  //     return
+  //   }
+
+  //   consumerPeer.data.consumers.set(consumer.id, consumer)
+  //   consumer.on('transportclose', () => {
+  //     consumerPeer.data.consumers.delete(consumer.id)
+  //   })
+
+  //   consumer.on('producerclose', () => {
+  //     consumerPeer.data.consumers.delete(consumer.id)
+  //     consumerPeer.notify('consumerClosed', { consumerId: consumer.id }).catch(() => {})
+  //   })
+
+  //   try {
+  //     await consumerPeer.request('newDataConsumer', {
+  //       peerId: producerPeer.id,
+  //       producerId: producer.id,
+  //       id: consumer.id,
+  //       label: consumer.label,
+  //       sctpStreamParameters: consumer.sctpStreamParameters,
+  //     })
+  //   } catch (error) {
+  //     console.warn('createDataConsumer() | failed:%o', error)
+  //   }
+  // }
 }
 
 function getRouterOptions() {
