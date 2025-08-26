@@ -29,6 +29,7 @@ class RobotClient:
         self.cameras = cameras
 
         self.tasks = []
+        self.closed = False
 
     # websocket receive task
     async def recv_msg_task(self):

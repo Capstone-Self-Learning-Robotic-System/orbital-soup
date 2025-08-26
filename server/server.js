@@ -1,15 +1,19 @@
 // external dependencies
-const http = require('http')
+const https = require('https')
 
 const express = require('express')
 const mediasoup = require('mediasoup')
 const protoo = require('protoo-server')
+const fs = require('fs')
+
+const key = fs.readFileSync('/home/orbital-user/orbital-soup/server/privkey.pem', 'utf-8');
+const cert = fs.readFileSync('/home/orbital-user/orbital-soup/server/fullchain.pem', 'utf-8');
 
 // local dependencies
 const Room = require('./room')
 
 // global variables
-let httpServer
+let httpsServer
 let appServer
 let socketServer
 let mediasoupWorker
@@ -25,7 +29,7 @@ async function run() {
 
 async function runMediasoupWorker() {
   // create a mediasoup worker
-  console.info('Running media soup worker')
+  // console.info('Running media soup worker')
   mediasoupWorker = await mediasoup.createWorker({
     logLevel: 'warn',
     logTags: [
@@ -57,25 +61,39 @@ async function runMediasoupWorker() {
 
 async function createAppServer() {
   // create an express server
-  console.info('Running app server')
+  // console.info('Running app server')
   appServer = express()
   appServer.use(express.json())
 }
 
 async function runHttpServer() {
   // create an http server
-  console.info('Running http server')
-  httpServer = http.createServer(appServer)
+  // console.info('Running https server')
+
+  httpsServer = https.createServer({ key, cert }, appServer)
   await new Promise((resolve) => {
-    httpServer.listen(8000, '10.2.0.4', resolve)
+    httpsServer.listen(8000, '10.2.0.4', resolve)
   })
 }
 
 async function runSocketServer() {
-  // create a web socket server
-  console.info('Running web socket server')
 
-  socketServer = new protoo.WebSocketServer(httpServer, {
+  // roomId to create
+  const createRoomId = process.argv[2]
+
+  // create room
+  const room = await Room.create({ mediasoupWorker })
+  room.on('close', () => {
+    console.warn('[%s] Room closed', createRoomId)
+    rooms.delete(createRoomId)
+  })
+  rooms.set(createRoomId, room)
+  console.info('[%s] Room created', createRoomId)
+
+  // create a web socket server
+  // console.info('Running web socket server')
+
+  socketServer = new protoo.WebSocketServer(httpsServer, {
     maxReceivedFrameSize     : 960000,
     maxReceivedMessageSize   : 960000,
     fragmentOutgoingMessages : true,
@@ -100,23 +118,17 @@ async function runSocketServer() {
       return
     }
 
-    if (rooms.has(roomId)) {
-      room = rooms.get(roomId)
-    } else {
-      room = await Room.create({ mediasoupWorker })
-      room.on('close', () => {
-        console.warn('[%s] Room closed', roomId)
-        rooms.delete(roomId)
-      })
-      rooms.set(roomId, room)
-      console.info('[%s] Room created', roomId)
+    // check if the room exists
+    if (!rooms.has(roomId)) {
+      reject(400, 'Room not found')
+      return
     }
 
     // handle the connection request
     try {
       rooms.get(roomId).handleProtooConnection({ peerId, consume: true, protooWebSocketTransport: accept() })
     } catch (error) {
-      console.error('Room creation or room joining failed: %o', error)
+      console.error('Room joining failed: %o', error)
       reject()
     }
   })

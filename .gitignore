@@ -10,3 +10,9 @@ node_modules
 # Parcel
 dist
 .parcel-cache
+
+# Keys
+/server/*.pem
+
+# Virtual Environment
+/soup-stuff

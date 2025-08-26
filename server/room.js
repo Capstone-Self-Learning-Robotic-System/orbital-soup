@@ -20,6 +20,7 @@ class Room extends EventEmitter {
     this.room = room
     this.mediasoupRouter = mediasoupRouter
     this.broadcasters = new Map()
+    this.controllingPeer = null
   }
 
   close() {
@@ -31,16 +32,24 @@ class Room extends EventEmitter {
 
   handleProtooConnection({ peerId, consume, protooWebSocketTransport }) {
     // check if the peerId is already connected
-    if (peerId.startsWith('robot-')) {
-        const existingRobot = this.room.peers.find(peer => peer.id.startsWith('robot-'))
-        if (existingRobot) {
-            throw new Error('Robot already connected')
-        }
+    if (peerId.startsWith('orbital-')) {
+      // only one orbital allowed
+      const existingOrbital = this.room.peers.find(peer => peer.id.startsWith('orbital-'))
+      if (existingOrbital) {
+          throw new Error('Orbital already connected')
+      }
+    } else if (peerId.startsWith('robot-')) {
+      // only one robot (with multiple cameras) allowed
+      const existingRobot = this.room.peers.find(peer => peer.id.startsWith('robot-'))
+      if (existingRobot) {
+          throw new Error('Robot already connected')
+      }
     } else if (peerId.startsWith('client-')) {
-        const existingClient = this.room.getPeer(peerId)
-        if (existingClient) {
-            throw new Error('Client already connected')
-        }
+      // only one connection per clientId
+      const existingClient = this.room.getPeer(peerId)
+      if (existingClient) {
+          throw new Error('Client already connected')
+      }
     }
 
     // create the peer
@@ -77,10 +86,6 @@ class Room extends EventEmitter {
 
       console.log("[%s] Peer closed", peer.id)
 
-      if (peer.id.startsWith('robot-')) {
-        this.close()
-      }
-
       if (peer.data.joined) {
         for (const otherPeer of this.getJoinedPeers({ excludePeer: peer })) {
           otherPeer.notify('peerClosed', { peerId: peer.id }).catch(() => {})
@@ -115,27 +120,36 @@ class Room extends EventEmitter {
         peer.data.rtpCapabilities = rtpCapabilities
         peer.data.sctpCapabilities = sctpCapabilities
 
-        // tell the new peer about already joined peers
-        // and also create consumers for existing producers
+        // tell new peer about already joined peers
+        // create consumers for existing producers
         const joinedPeers = [
           ...this.getJoinedPeers(),
           ...this.broadcasters.values(),
         ]
 
-        // reply now the request with the list of joined peers (all but the new one)
+        // reply with list of joined peers
         const peerInfos = joinedPeers
           .filter((joinedPeer) => joinedPeer.id !== peer.id)
           .map((joinedPeer) => ({ id: joinedPeer.id }))
 
         accept({ peers: peerInfos })
 
-        // mark the new peer as joined
+        // mark new peer as joined
         peer.data.joined = true
 
         for (const joinedPeer of joinedPeers) {
           // create consumers for existing producers
           for (const producer of joinedPeer.data.producers.values()) {
-            if (joinedPeer.id.startsWith('robot-')) {
+            // create consumer for orbital stream
+            if (joinedPeer.id.startsWith('orbital-') && peer.id.startsWith('client-')) {
+              this.createConsumer({
+                consumerPeer: peer,
+                producerPeer: joinedPeer,
+                producer,
+              })
+            }
+            // create consumer for robot stream
+            if (joinedPeer.id.startsWith('robot-') && peer.id.startsWith('client-')) {
               this.createConsumer({
                 consumerPeer: peer,
                 producerPeer: joinedPeer,
@@ -151,13 +165,17 @@ class Room extends EventEmitter {
             .catch(() => {});
         }
 
+        // if there's a controlling peer, restrict new peer
+        if (this.controllingPeer) {
+          peer.request('restrict', { peerId: this.controllingPeer })
+            .catch(() => {});
+        }
+
         console.log("[%s] Peer joined", peer.id)
         break;
       }
 
       case 'createWebRtcTransport': {
-        // NOTE: don't require that the peer is joined here, so the client can
-        // initiate mediasoup transports and be ready when he later joins
         const {
           producing,
           consuming,
@@ -179,9 +197,10 @@ class Room extends EventEmitter {
           appData        : { producing, consuming },
         }
 
+        // create new transport
         const transport = await this.mediasoupRouter.createWebRtcTransport(webRtcTransportOptions)
 
-        // store the web rtc transport into the protoo peer data object
+        // store web rtc transport into the protoo peer data object
         peer.data.transports.set(transport.id, transport)
 
         accept({
@@ -217,7 +236,7 @@ class Room extends EventEmitter {
       }
 
       case 'produce': {
-        // ensure the peer is joined
+        // ensure peer is joined
         if (!peer.data.joined) {
           throw new Error('Peer not yet joined')
         }
@@ -230,8 +249,7 @@ class Room extends EventEmitter {
           throw new Error(`transport with id "${transportId}" not found`)
         }
 
-        // add peerId into appData to later get the associated peer during
-        // the 'loudest' event of the audioLevelObserver
+        // add peerId into appData
         appData = { ...appData, peerId: peer.id }
 
         const producer = await transport.produce({
@@ -247,6 +265,9 @@ class Room extends EventEmitter {
         console.log("[%s] Created video producer", peer.id)
         break
       }
+
+      // old implementation of data producers/consumers
+      // (not used but could be useful in the future)
 
       // case 'produceData': {
 
@@ -273,12 +294,12 @@ class Room extends EventEmitter {
       //     label,
       //   })
         
-      //   const robotPeer = this.room.peers.find(peer => peer.id.startsWith('robot-'))
-      //   robotPeer.data.consumers.set(consumer.id, consumer)
+      //   const orbitalPeer = this.room.peers.find(peer => peer.id.startsWith('orbital-'))
+      //   orbitalPeer.data.consumers.set(consumer.id, consumer)
 
-      //   if (robotPeer) {
+      //   if (orbitalPeer) {
       //     this.createDataConsumer({
-      //       consumerPeer: robotPeer,
+      //       consumerPeer: orbitalPeer,
       //       producerPeer: peer,
       //       producer,
       //     })
@@ -293,7 +314,7 @@ class Room extends EventEmitter {
       // }
 
       case 'closeProducer': {
-        // ensure the peer is joined
+        // ensure peer is joined
         if (!peer.data.joined) {
           throw new Error('Peer not yet joined')
         }
@@ -316,19 +337,59 @@ class Room extends EventEmitter {
       }
 
       case 'data': {
+        // handle incoming data (orbital orientation)
         const { label, orientation } = request.data
-        console.log("[%s] %s data received", peer.id, label)
 
-        const robotPeer = this.room.peers.find(peer => peer.id.startsWith('robot-'))
-        if (robotPeer) {
-          robotPeer.request('data', {
-            id: 12345,
-            label,
-            orientation
-          })
+        if (peer.id === this.controllingPeer) {
+          const orbitalPeer = this.room.peers.find(peer => peer.id.startsWith('orbital-'))
+          if (orbitalPeer) {
+            orbitalPeer.request('data', {
+              id: 12345,
+              label,
+              orientation
+            }).then(() => {
+              // console.log("[%s] Data sent to orbital", peer.id)
+            }).catch((error) => {
+              console.error("[%s] Error sending data to orbital", peer.id, error)
+            })
+          }
         }
 
         accept()
+        
+        break
+      }
+
+      case 'access': {
+        // handle access request
+        if (this.controllingPeer) {
+          reject(400, 'Another peer is already controlling')
+          console.log("[%s] Peer access rejected", peer.id)
+          break
+        } else {
+          this.controllingPeer = peer.id
+          console.log("[%s] Peer access", peer.id)
+          accept()
+
+          for (const otherPeer of this.getJoinedPeers({ excludePeer: peer })) {
+            otherPeer.request('restrict', { peerId: peer.id })
+              .catch(() => {});
+          }
+          
+          break
+        }
+      }
+
+      case 'release': {
+        // handle release request
+        this.controllingPeer = null
+        console.log("[%s] Peer release", peer.id)
+        accept()
+
+        for (const otherPeer of this.getJoinedPeers({ excludePeer: peer })) {
+          otherPeer.request('regain', { peerId: peer.id })
+            .catch(() => {});
+        }
         
         break
       }
@@ -383,6 +444,8 @@ class Room extends EventEmitter {
       console.warn('createConsumer() | failed:%o', error)
     }
   }
+
+  // old implementation of data consumers (again, ignore)
 
   // async createDataConsumer({ consumerPeer, producerPeer, producer }) {
 
