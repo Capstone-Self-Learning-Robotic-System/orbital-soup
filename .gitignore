@@ -16,3 +16,6 @@ dist
 
 # Virtual Environment
 /soup-stuff
+
+# Misc
+/robot/robot.py
